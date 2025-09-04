@@ -1,8 +1,6 @@
 
 
 import { db } from '@/lib/firebase/client';
-import { AccountFormData } from '@/components/chart-of-accounts/account-dialog';
-import type { Account } from '@/components/chart-of-accounts/account-tree';
 import {
   collection,
   doc,
@@ -18,8 +16,23 @@ import {
   orderBy
 } from 'firebase/firestore';
 
-// Re-export the Account type so other modules can import it from here
-export type { Account };
+// Base interface for form data
+export interface AccountFormData {
+  name: string;
+  code: string;
+  type: 'Debit' | 'Credit';
+  group: 'Assets' | 'Liabilities' | 'Equity' | 'Revenues' | 'Expenses';
+  status: 'Active' | 'Inactive';
+  closingType: 'Balance Sheet' | 'Income Statement';
+  classifications: string[];
+  parentId?: string | null;
+}
+
+// Account interface including ID and children for tree structure
+export interface Account extends AccountFormData {
+  id: string;
+  children?: Account[];
+}
 
 
 const defaultAccounts: (Omit<Account, 'id' | 'children'> & { children?: (Omit<Account, 'id' | 'children' | 'parentId'> & {children?: any[], parentId?: string})[] })[] = [
@@ -225,6 +238,7 @@ export const deleteAccount = async (accountId: string): Promise<void> => {
         transaction.delete(accountToDeleteRef);
     });
 };
+
 
 
 

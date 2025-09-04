@@ -3,7 +3,7 @@
 
 import { SalesForm } from '@/components/sales/sales-form';
 import { SalesRecords } from '@/components/sales/sales-records';
-import { Account } from '@/components/chart-of-accounts/account-tree';
+import type { Account } from '@/lib/firebase/firestore/accounts';
 import { useEffect, useState } from 'react';
 import { getAccounts } from '@/lib/firebase/firestore/accounts';
 import { Skeleton } from '@/components/ui/skeleton';

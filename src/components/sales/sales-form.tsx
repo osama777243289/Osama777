@@ -45,7 +45,7 @@ import {
   Paperclip
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
-import type { Account } from '../chart-of-accounts/account-tree';
+import type { Account } from '@/lib/firebase/firestore/accounts';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { addSaleRecord, salesRecordSchema } from '@/lib/firebase/firestore/sales';

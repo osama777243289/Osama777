@@ -19,8 +19,8 @@ import {
 } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { z } from 'zod';
-import { getAccounts } from './accounts';
-import { Account } from '@/components/chart-of-accounts/account-tree';
+import { getAccounts, Account } from './accounts';
+
 
 const cardAccountDetailSchema = z.object({
     accountId: z.string(),

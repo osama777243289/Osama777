@@ -1,0 +1,53 @@
+# The name of the backend.
+# The name must be unique within the project and cannot be changed after creation.
+id: next-app
+# The region to deploy the backend.
+# The supported regions are: us-central1, us-west1, us-east1, europe-west1, asia-east1.
+region: us-central1
+# The minimum number of instances to run.
+# The default value is 1.
+minInstances: 1
+# The maximum number of instances to run.
+# This value must be greater than or equal to minInstances.
+maxInstances: 10
+# The instance size to use.
+# The supported values are: cpu-micro, cpu-small, cpu-medium, cpu-large, memory-small, memory-medium, memory-large.
+instanceSize: cpu-small
+# The environment variables to set.
+env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyD0fSUx51wV1NHBmGfnR5PLZHU4PSWrwDU
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: daily-sales-tracker-cr1db.firebaseapp.com
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: daily-sales-tracker-cr1db
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: daily-sales-tracker-cr1db.appspot.com
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: '470454086647'
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: 1:470454086647:web:8e1bdbf9e34049304c9cf2
+# The build commands to run.
+# These commands will be run in the root directory of the project.
+gcp-build: npm run build
+# The start command to run.
+# This command will be run in the root directory of the project.
+# The command must start a web server that listens on the port specified by the
+# PORT environment variable.
+run: npm run start
+# The health check to use.
+# The default value is a TCP health check on the port specified by the PORT environment variable.
+healthCheck: {}
+# The service account to use.
+# The default value is the App Engine default service account.
+serviceAccount: app-hosting-backends@daily-sales-tracker-cr1db.iam.gserviceaccount.com
+# The number of concurrent requests to allow.
+# The default value is 80.
+concurrency: 80
+# The VPC connector to use.
+# This is an optional field.
+# vpcConnector: projects/YOUR_PROJECT_ID/locations/YOUR_REGION/connectors/YOUR_CONNECTOR_NAME
+# The inbound traffic settings to use.
+# The default value is INGRESS_TRAFFIC_ALLOWED_ALL.
+# The supported values are: INGRESS_TRAFFIC_ALLOWED_ALL, INGRESS_TRAFFIC_ALLOWED_INTERNAL_ONLY, INGRESS_TRAFFIC_ALLOWED_INTERNAL_AND_LB.
+inboundTraffic: INGRESS_TRAFFIC_ALLOWED_ALL

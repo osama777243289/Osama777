@@ -1,0 +1,350 @@
+
+
+'use client';
+
+import { db, storage } from '@/lib/firebase/client';
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  limit,
+  getDocs,
+  Timestamp,
+  where,
+  writeBatch,
+  doc,
+  getDoc,
+  updateDoc,
+} from 'firebase/firestore';
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { z } from 'zod';
+import { getAccounts } from './accounts';
+import { Account } from '@/components/chart-of-accounts/account-tree';
+
+const cardAccountDetailSchema = z.object({
+    accountId: z.string(),
+    amount: z.coerce.number().min(0, 'Amount must be positive.'),
+    receiptImage: z.string().optional(), // Expecting a base64 data URL
+}).superRefine((data, ctx) => {
+    if (data.amount > 0 && !data.accountId) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "يجب تحديد حساب للبطاقة طالما أن المبلغ أكبر من صفر.",
+            path: ['accountId'],
+        });
+    }
+});
+
+
+const creditAccountDetailSchema = z.object({
+    accountId: z.string(),
+    amount: z.coerce.number().min(0, 'Amount must be positive.'),
+}).superRefine((data, ctx) => {
+    if (data.amount > 0 && !data.accountId) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "يجب تحديد حساب العميل طالما أن المبلغ أكبر من صفر.",
+            path: ['accountId'],
+        });
+    }
+});
+
+export const salesRecordSchema = z.object({
+  date: z.date(),
+  period: z.enum(['Morning', 'Evening']),
+  salesperson: z.string().min(2, 'Salesperson name is required.'),
+  postingNumber: z.string().optional(),
+  cash: z.object({
+    accountId: z.string(),
+    amount: z.coerce.number().min(0, 'Amount must be positive.'),
+  }).optional(),
+  cards: z.array(cardAccountDetailSchema).optional(),
+  credits: z.array(creditAccountDetailSchema).optional(),
+});
+
+export type SalesRecordFormData = z.infer<typeof salesRecordSchema>;
+
+export interface AccountDetail {
+  accountId: string;
+  accountName?: string;
+  amount: number;
+}
+
+export interface CardAccountDetail extends AccountDetail {
+  receiptImageUrl?: string; 
+}
+
+export interface SalesRecord {
+  id: string;
+  date: Timestamp;
+  period: 'Morning' | 'Evening';
+  cashier: string;
+  postingNumber?: string;
+  total: number;
+  status: 'Pending Upload' | 'Pending Matching' | 'Matched';
+  cash: AccountDetail;
+  cards: CardAccountDetail[];
+  credits: AccountDetail[];
+  createdAt: Timestamp;
+  actuals?: { [key: string]: number };
+  matchNotes?: string;
+}
+
+const seedSalesRecords = async () => {
+    const allAccounts = await getAccounts();
+    const flattenedAccounts: { id: string; name: string }[] = [];
+    const flatten = (accs: Account[]) => {
+        for (const acc of accs) {
+            flattenedAccounts.push({ id: acc.id, name: acc.name });
+            if (acc.children) {
+                flatten(acc.children);
+            }
+        }
+    };
+    flatten(allAccounts);
+
+    const cashAccount = flattenedAccounts.find(acc => acc.name.includes('كاشير'));
+    const networkAccount = flattenedAccounts.find(acc => acc.name.includes('شبكة'));
+    const clientAccount = flattenedAccounts.find(acc => acc.name.includes('اسامه'));
+
+    if (!cashAccount || !networkAccount || !clientAccount) {
+        console.log('Could not find default accounts for seeding sales. Seeding will be skipped.');
+        return;
+    }
+
+    const defaultRecords = [
+        {
+            date: Timestamp.fromDate(new Date()),
+            period: 'Morning',
+            cashier: 'Yousef Khaled',
+            postingNumber: 'PO-001',
+            total: 650,
+            status: 'Pending Matching' as const,
+            cash: { accountId: cashAccount.id, accountName: cashAccount.name, amount: 500 },
+            cards: [{ accountId: networkAccount.id, accountName: networkAccount.name, amount: 150 }],
+            credits: [],
+            createdAt: Timestamp.now(),
+        },
+        {
+            date: Timestamp.fromDate(new Date()),
+            period: 'Evening',
+            cashier: 'Ahmad Ali',
+            postingNumber: 'PO-002',
+            total: 1200,
+            status: 'Matched' as const,
+            cash: { accountId: cashAccount.id, accountName: cashAccount.name, amount: 800 },
+            cards: [],
+            credits: [{ accountId: clientAccount.id, accountName: clientAccount.name, amount: 400 }],
+            createdAt: Timestamp.now(),
+        },
+    ];
+
+    const batch = writeBatch(db);
+    const salesCol = collection(db, 'salesRecords');
+    defaultRecords.forEach((rec) => {
+        const newDocRef = doc(salesCol);
+        batch.set(newDocRef, rec);
+    });
+    await batch.commit();
+    console.log("Default sales records have been seeded.");
+};
+
+
+// Function to convert data URL to a Buffer
+const dataUrlToBuffer = (dataUrl: string): Buffer => {
+  const base64 = dataUrl.split(',')[1];
+  if (!base64) {
+    throw new Error('Invalid data URL');
+  }
+  return Buffer.from(base64, 'base64');
+};
+
+
+// Add a new sales record
+export const addSaleRecord = async (
+  data: SalesRecordFormData
+): Promise<string> => {
+  const salesCol = collection(db, 'salesRecords');
+  const allAccounts = await getAccounts();
+  const accountMap = createAccountMap(allAccounts);
+
+ const processedCards = await Promise.all(
+    (data.cards || []).map(async (card) => {
+      const processedCard: CardAccountDetail = {
+        accountId: card.accountId,
+        amount: card.amount,
+        accountName: accountMap.get(card.accountId) || 'Unknown',
+      };
+
+      // Safely check for receiptImage and upload it
+      if (card.receiptImage) {
+        try {
+          const imageBuffer = dataUrlToBuffer(card.receiptImage);
+          const storageRef = ref(storage, `receipts/${Date.now()}-${card.accountId}.jpg`);
+          const snapshot = await uploadBytes(storageRef, imageBuffer, { contentType: 'image/jpeg' });
+          processedCard.receiptImageUrl = await getDownloadURL(snapshot.ref);
+        } catch (error) {
+           console.error("Error uploading image for card:", card.accountId, error);
+           // Continue without image URL if upload fails
+        }
+      }
+      return processedCard;
+    })
+  );
+  
+  const validCards = processedCards.filter(c => c.accountId && c.amount > 0);
+  
+  let enrichedCash: AccountDetail = { accountId: '', amount: 0, accountName: ''};
+  if (data.cash && data.cash.accountId && data.cash.amount > 0) {
+      enrichedCash = {
+        accountId: data.cash.accountId,
+        amount: data.cash.amount,
+        accountName: accountMap.get(data.cash.accountId) || 'Unknown',
+      };
+  }
+
+  const validCredits = (data.credits || []).filter(c => c.accountId && c.amount > 0);
+  const enrichedCredits = validCredits.map((credit) => ({
+      accountId: credit.accountId,
+      amount: credit.amount,
+      accountName: accountMap.get(credit.accountId) || 'Unknown',
+    }));
+
+  const total =
+    (enrichedCash.amount || 0) +
+    (validCards?.reduce((sum, item) => sum + item.amount, 0) || 0) +
+    (enrichedCredits?.reduce((sum, item) => sum + item.amount, 0) || 0);
+
+  const dataToSave = {
+    date: Timestamp.fromDate(data.date),
+    period: data.period,
+    cashier: data.salesperson,
+    postingNumber: data.postingNumber || null,
+    total: total,
+    status: 'Pending Matching',
+    cash: enrichedCash,
+    cards: validCards,
+    credits: enrichedCredits,
+    createdAt: Timestamp.now(),
+  };
+
+  const newDocRef = await addDoc(salesCol, dataToSave);
+  return newDocRef.id;
+};
+
+
+// Helper to create a map of account IDs to names
+const createAccountMap = (accounts: Account[]): Map<string, string> => {
+  const accountMap = new Map<string, string>();
+  const traverse = (accs: Account[]) => {
+    for (const acc of accs) {
+      accountMap.set(acc.id, acc.name);
+      if (acc.children) {
+        traverse(acc.children);
+      }
+    }
+  };
+  traverse(accounts);
+  return accountMap;
+};
+
+// Function to enrich records with account names
+const enrichRecordsWithAccountNames = (
+  records: Omit<SalesRecord, 'id'>[],
+  accountMap: Map<string, string>
+): Omit<SalesRecord, 'id'>[] => {
+  return records.map((record) => ({
+    ...record,
+    cash: {
+      ...record.cash,
+      accountName: accountMap.get(record.cash.accountId) || 'Unknown Account',
+    },
+    cards: record.cards.map((card) => ({
+      ...card,
+      accountName: accountMap.get(card.accountId) || 'Unknown Account',
+    })),
+    credits: record.credits.map((credit) => ({
+      ...credit,
+      accountName: accountMap.get(credit.accountId) || 'Unknown Account',
+    })),
+  }));
+};
+
+// Get all sales records
+export const getSalesRecords = async (
+  count: number = 20
+): Promise<SalesRecord[]> => {
+  const salesCol = collection(db, 'salesRecords');
+  const q = query(salesCol, orderBy('createdAt', 'desc'), limit(count));
+  const snapshot = await getDocs(q);
+
+  if (snapshot.empty) {
+    console.log('No sales records found, seeding database...');
+    await seedSalesRecords();
+    const seededSnapshot = await getDocs(q);
+    if (seededSnapshot.empty) return [];
+    return seededSnapshot.docs.map(
+      (doc) => ({ id: doc.id, ...doc.data() } as SalesRecord)
+    );
+  }
+
+  return snapshot.docs.map(
+    (doc) => ({ id: doc.id, ...doc.data() } as SalesRecord)
+  );
+};
+
+// Get sales records by status
+export const getSalesRecordsByStatus = async (
+  status: 'Pending Matching' | 'Matched' | 'Pending Upload'
+): Promise<SalesRecord[]> => {
+  const salesCol = collection(db, 'salesRecords');
+  const q = query(
+    salesCol,
+    where('status', '==', status),
+    orderBy('createdAt', 'desc')
+  );
+  const snapshot = await getDocs(q);
+
+  if (snapshot.empty && status === 'Pending Matching') {
+    // Let's not seed here anymore to avoid unexpected behavior.
+    // If it's empty, it's empty.
+    return [];
+  }
+
+  return snapshot.docs.map(
+    (doc) => ({ id: doc.id, ...doc.data() } as SalesRecord)
+  );
+};
+
+
+// Get a single sales record by its ID
+export const getSaleRecordById = async (id: string): Promise<SalesRecord | null> => {
+  if (!id) return null;
+  const docRef = doc(db, 'salesRecords', id);
+  const docSnap = await getDoc(docRef);
+
+  if (docSnap.exists()) {
+    return { id: docSnap.id, ...docSnap.data() } as SalesRecord;
+  } else {
+    console.log("No such document!");
+    return null;
+  }
+}
+
+// Update a sales record's status and actuals
+export const updateSaleRecordStatus = async (
+  recordId: string,
+  status: 'Matched' | 'Rejected',
+  actuals: { [key: string]: number },
+  notes: string
+): Promise<void> => {
+  const recordRef = doc(db, 'salesRecords', recordId);
+  await updateDoc(recordRef, {
+    status,
+    actuals,
+    matchNotes: notes,
+  });
+};
+
+    

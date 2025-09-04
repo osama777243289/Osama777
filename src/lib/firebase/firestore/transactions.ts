@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore';
 import { z } from 'zod';
 import { getAccounts } from './accounts';
-import type { Account } from '@/components/chart-of-accounts/account-tree';
+import type { Account } from './accounts';
 
 export const transactionSchema = z.object({
   amount: z.coerce.number().positive('يجب أن يكون المبلغ أكبر من صفر'),

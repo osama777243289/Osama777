@@ -1,6 +1,5 @@
 
 import { db } from '@/lib/firebase/client';
-import { RoleFormData } from '@/components/roles/role-dialog';
 import {
   collection,
   doc,
@@ -15,6 +14,10 @@ import {
 
 export interface Role {
   id: string;
+  name: string;
+}
+
+export interface RoleFormData {
   name: string;
 }
 
